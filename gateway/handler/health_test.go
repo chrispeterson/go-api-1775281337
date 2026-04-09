@@ -7,47 +7,134 @@ import (
 	"testing"
 )
 
-func TestHealth(t *testing.T) {
+// TestHealthHandler uses a table-driven test pattern to cover multiple scenarios
+func TestHealthHandler(t *testing.T) {
 	tests := []struct {
 		name           string
-		wantStatus     int
-		wantStatusBody string
+		method         string
+		expectedStatus int
+		expectedBody   string
+		description    string
 	}{
 		{
-			name:           "successful request returns 200",
-			wantStatus:     http.StatusOK,
-			wantStatusBody: "ok",
+			name:           "GET request returns 200",
+			method:         http.MethodGet,
+			expectedStatus: http.StatusOK,
+			expectedBody:   "ok",
+			description:    "Should return 200 status code for GET /health",
+		},
+		{
+			name:           "POST request returns 200",
+			method:         http.MethodPost,
+			expectedStatus: http.StatusOK,
+			expectedBody:   "ok",
+			description:    "Should return 200 status code for POST /health",
+		},
+		{
+			name:           "HEAD request returns 200",
+			method:         http.MethodHead,
+			expectedStatus: http.StatusOK,
+			expectedBody:   "",
+			description:    "Should return 200 status code for HEAD /health",
 		},
 	}
 
 	for _, tt := range tests {
+		t := tt // capture loop variable
 		t.Run(tt.name, func(t *testing.T) {
-			rr := httptest.NewRecorder()
-			req := httptest.NewRequest("GET", "/health", nil)
+			// Create HTTP request
+			req := httptest.NewRequest(tt.method, "/health", nil)
+			rec := httptest.NewRecorder()
 
-			Health(rr, req)
+			// Call handler
+			Health(rec, req)
 
-			// Check status code
-			if rr.Code != tt.wantStatus {
-				t.Errorf("Health() status = %v, want %v", rr.Code, tt.wantStatus)
+			// Assert status code
+			if rec.Code != tt.expectedStatus {
+				t.Errorf("%s: got status %d, want %d", tt.description, rec.Code, tt.expectedStatus)
 			}
 
-			// Check Content-Type header
-			if ct := rr.Header().Get("Content-Type"); ct != "application/json" {
-				t.Errorf("Health() Content-Type = %v, want application/json", ct)
+			// Assert Content-Type header for non-HEAD requests
+			if tt.method != http.MethodHead {
+				contentType := rec.Header().Get("Content-Type")
+				if contentType != "application/json" {
+					t.Errorf("Content-Type: got %q, want "application/json"", contentType)
+				}
 			}
 
-			// Check response body is valid JSON
-			var resp HealthResponse
-			err := json.NewDecoder(rr.Body).Decode(&resp)
-			if err != nil {
-				t.Errorf("Health() response body is not valid JSON: %v", err)
-			}
-
-			// Check response contains correct status field
-			if resp.Status != tt.wantStatusBody {
-				t.Errorf("Health() status field = %v, want %v", resp.Status, tt.wantStatusBody)
+			// Assert response body for non-HEAD requests
+			if tt.method != http.MethodHead && len(tt.expectedBody) > 0 {
+				var response HealthResponse
+				err := json.Unmarshal(rec.Body.Bytes(), &response)
+				if err != nil {
+					t.Errorf("Failed to unmarshal JSON: %v", err)
+				}
+				if response.Status != tt.expectedBody {
+					t.Errorf("Status field: got %q, want %q", response.Status, tt.expectedBody)
+				}
 			}
 		})
+	}
+}
+
+// TestHealthHandlerStatusField verifies the status field is present and correct
+func TestHealthHandlerStatusField(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+
+	Health(rec, req)
+
+	var response HealthResponse
+	err := json.Unmarshal(rec.Body.Bytes(), &response)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal JSON: %v", err)
+	}
+
+	if response.Status != "ok" {
+		t.Errorf("Status field: got %q, want "ok"", response.Status)
+	}
+}
+
+// TestHealthHandlerContentType verifies Content-Type header is set correctly
+func TestHealthHandlerContentType(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+
+	Health(rec, req)
+
+	contentType := rec.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("Content-Type: got %q, want "application/json"", contentType)
+	}
+}
+
+// TestHealthHandlerJSONValidity validates that response is valid JSON
+func TestHealthHandlerJSONValidity(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+
+	Health(rec, req)
+
+	var response map[string]interface{}
+	err := json.Unmarshal(rec.Body.Bytes(), &response)
+	if err != nil {
+		t.Fatalf("Response body must be valid JSON: %v", err)
+	}
+
+	// Verify structure
+	if _, ok := response["status"]; !ok {
+		t.Error("Response should contain 'status' key")
+	}
+}
+
+// TestHealthHandlerStatusCode verifies 200 OK status
+func TestHealthHandlerStatusCode(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rec := httptest.NewRecorder()
+
+	Health(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("Status code: got %d, want %d", rec.Code, http.StatusOK)
 	}
 }
