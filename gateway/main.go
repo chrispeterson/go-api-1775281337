@@ -23,8 +23,8 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	helloHandler := handler.NewHelloHandler()
-	mux.Handle("/hello", helloHandler)
+	// Register health endpoint
+	mux.HandleFunc("GET /health", handler.Health)
 
 	srv := &http.Server{
 		Addr:         ":" + port,
@@ -53,8 +53,9 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		slog.Error("graceful shutdown failed", "err", err)
+		slog.Error("server shutdown error", "err", err)
 		os.Exit(1)
 	}
+
 	slog.Info("server stopped")
 }
