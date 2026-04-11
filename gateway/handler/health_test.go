@@ -5,136 +5,187 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// TestHealthHandler uses a table-driven test pattern to cover multiple scenarios
-func TestHealthHandler(t *testing.T) {
+func TestHealth_GetRequest_Returns200(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+
+	Health(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "status code should be 200")
+}
+
+func TestHealth_ResponseBody_ValidJSON(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+
+	Health(w, req)
+
+	var responseBody map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &responseBody)
+	require.NoError(t, err, "response body should be valid JSON")
+	assert.Equal(t, "ok", responseBody["status"], "status field should be 'ok'")
+}
+
+func TestHealth_ContentTypeHeader_ApplicationJSON(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+
+	Health(w, req)
+
+	contentType := w.Header().Get("Content-Type")
+	assert.Equal(t, "application/json", contentType, "Content-Type header should be application/json")
+}
+
+func TestHealth_TableDriven(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name           string
 		method         string
 		expectedStatus int
-		expectedBody   string
-		description    string
+		expectBody     bool
 	}{
 		{
-			name:           "GET request returns 200",
+			name:           "GET request returns 200 with body",
 			method:         http.MethodGet,
 			expectedStatus: http.StatusOK,
-			expectedBody:   "ok",
-			description:    "Should return 200 status code for GET /health",
+			expectBody:     true,
 		},
 		{
-			name:           "POST request returns 200",
+			name:           "POST request returns 405",
 			method:         http.MethodPost,
-			expectedStatus: http.StatusOK,
-			expectedBody:   "ok",
-			description:    "Should return 200 status code for POST /health",
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectBody:     false,
 		},
 		{
-			name:           "HEAD request returns 200",
-			method:         http.MethodHead,
-			expectedStatus: http.StatusOK,
-			expectedBody:   "",
-			description:    "Should return 200 status code for HEAD /health",
+			name:           "PUT request returns 405",
+			method:         http.MethodPut,
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectBody:     false,
+		},
+		{
+			name:           "DELETE request returns 405",
+			method:         http.MethodDelete,
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectBody:     false,
+		},
+		{
+			name:           "PATCH request returns 405",
+			method:         http.MethodPatch,
+			expectedStatus: http.StatusMethodNotAllowed,
+			expectBody:     false,
 		},
 	}
 
 	for _, tt := range tests {
-		t := tt // capture loop variable
 		t.Run(tt.name, func(t *testing.T) {
-			// Create HTTP request
+			t.Parallel()
+
 			req := httptest.NewRequest(tt.method, "/health", nil)
-			rec := httptest.NewRecorder()
+			w := httptest.NewRecorder()
 
-			// Call handler
-			Health(rec, req)
+			Health(w, req)
 
-			// Assert status code
-			if rec.Code != tt.expectedStatus {
-				t.Errorf("%s: got status %d, want %d", tt.description, rec.Code, tt.expectedStatus)
-			}
+			assert.Equal(t, tt.expectedStatus, w.Code, "status code mismatch")
 
-			// Assert Content-Type header for non-HEAD requests
-			if tt.method != http.MethodHead {
-				contentType := rec.Header().Get("Content-Type")
-				if contentType != "application/json" {
-					t.Errorf("Content-Type: got %q, want "application/json"", contentType)
-				}
-			}
-
-			// Assert response body for non-HEAD requests
-			if tt.method != http.MethodHead && len(tt.expectedBody) > 0 {
-				var response HealthResponse
-				err := json.Unmarshal(rec.Body.Bytes(), &response)
-				if err != nil {
-					t.Errorf("Failed to unmarshal JSON: %v", err)
-				}
-				if response.Status != tt.expectedBody {
-					t.Errorf("Status field: got %q, want %q", response.Status, tt.expectedBody)
-				}
+			if tt.expectBody {
+				var responseBody map[string]interface{}
+				err := json.Unmarshal(w.Body.Bytes(), &responseBody)
+				require.NoError(t, err, "response should be valid JSON")
+				assert.Equal(t, "ok", responseBody["status"])
 			}
 		})
 	}
 }
 
-// TestHealthHandlerStatusField verifies the status field is present and correct
-func TestHealthHandlerStatusField(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
+func TestHealth_ConsistentAcrossMultipleCalls(t *testing.T) {
+	t.Parallel()
 
-	Health(rec, req)
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/health", nil)
+		w := httptest.NewRecorder()
 
-	var response HealthResponse
-	err := json.Unmarshal(rec.Body.Bytes(), &response)
-	if err != nil {
-		t.Fatalf("Failed to unmarshal JSON: %v", err)
-	}
+		Health(w, req)
 
-	if response.Status != "ok" {
-		t.Errorf("Status field: got %q, want "ok"", response.Status)
-	}
-}
+		assert.Equal(t, http.StatusOK, w.Code, "call %d: status should be 200", i+1)
+		assert.Equal(t, "application/json", w.Header().Get("Content-Type"), "call %d: Content-Type mismatch", i+1)
 
-// TestHealthHandlerContentType verifies Content-Type header is set correctly
-func TestHealthHandlerContentType(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
-
-	Health(rec, req)
-
-	contentType := rec.Header().Get("Content-Type")
-	if contentType != "application/json" {
-		t.Errorf("Content-Type: got %q, want "application/json"", contentType)
+		var responseBody map[string]interface{}
+		err := json.Unmarshal(w.Body.Bytes(), &responseBody)
+		require.NoError(t, err, "call %d: response should be valid JSON", i+1)
+		assert.Equal(t, "ok", responseBody["status"], "call %d: status field mismatch", i+1)
 	}
 }
 
-// TestHealthHandlerJSONValidity validates that response is valid JSON
-func TestHealthHandlerJSONValidity(t *testing.T) {
+func TestHealth_ResponseBodyStructure(t *testing.T) {
+	t.Parallel()
+
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
+	w := httptest.NewRecorder()
 
-	Health(rec, req)
+	Health(w, req)
 
-	var response map[string]interface{}
-	err := json.Unmarshal(rec.Body.Bytes(), &response)
-	if err != nil {
-		t.Fatalf("Response body must be valid JSON: %v", err)
-	}
+	var responseBody map[string]interface{}
+	err := json.Unmarshal(w.Body.Bytes(), &responseBody)
+	require.NoError(t, err, "response should be valid JSON")
 
-	// Verify structure
-	if _, ok := response["status"]; !ok {
-		t.Error("Response should contain 'status' key")
-	}
+	// Verify required fields exist
+	status, exists := responseBody["status"]
+	require.True(t, exists, "response must contain 'status' field")
+	assert.Equal(t, "ok", status, "status field should be 'ok'")
+
+	// Verify no extra fields
+	assert.Equal(t, 1, len(responseBody), "response should contain exactly one field")
 }
 
-// TestHealthHandlerStatusCode verifies 200 OK status
-func TestHealthHandlerStatusCode(t *testing.T) {
+func TestHealth_HeadersSetBeforeWriteHeader(t *testing.T) {
+	t.Parallel()
+
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	rec := httptest.NewRecorder()
+	w := httptest.NewRecorder()
 
-	Health(rec, req)
+	Health(w, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("Status code: got %d, want %d", rec.Code, http.StatusOK)
+	// Verify Content-Type is present
+	headers := w.Header()
+	assert.NotNil(t, headers)
+	assert.NotEmpty(t, headers.Get("Content-Type"))
+	assert.Equal(t, "application/json", headers.Get("Content-Type"))
+}
+
+func TestHealth_MethodNotAllowed_AllMethods(t *testing.T) {
+	t.Parallel()
+
+	notAllowedMethods := []string{
+		http.MethodPost,
+		http.MethodPut,
+		http.MethodPatch,
+		http.MethodDelete,
+		http.MethodHead,
+		http.MethodOptions,
+	}
+
+	for _, method := range notAllowedMethods {
+		t.Run("method "+method, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest(method, "/health", nil)
+			w := httptest.NewRecorder()
+
+			Health(w, req)
+
+			assert.Equal(t, http.StatusMethodNotAllowed, w.Code, "method %s should not be allowed", method)
+		})
 	}
 }
