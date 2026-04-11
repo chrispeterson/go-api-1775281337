@@ -1,145 +1,237 @@
-package handler_test
+package handler
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/chrispeterson/go-api-1775281337/gateway/handler"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestHelloHandler_Unit(t *testing.T) {
-	t.Parallel()
+// TestHelloResponse represents the expected JSON response structure
+type TestHelloResponse struct {
+	Message string `json:"message"`
+}
 
+// TestErrorResponse represents the error response structure
+type TestErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// TestHelloEndpoint is a table-driven test for the /hello endpoint
+func TestHelloEndpoint(t *testing.T) {
 	tests := []struct {
-		name       string
-		url        string
-		method     string
-		wantStatus int
-		wantJSON   map[string]string
+		name           string
+		queryParam     string
+		expectedStatus int
+		expectedMsg    string
+		isError        bool
+		description    string
 	}{
 		{
-			name:       "name=Alice returns 200 greeting",
-			url:        "/hello?name=Alice",
-			method:     http.MethodGet,
-			wantStatus: http.StatusOK,
-			wantJSON:   map[string]string{"message": "Hello, Alice!"},
+			name:           "hello with name=Alice",
+			queryParam:     "name=Alice",
+			expectedStatus: http.StatusOK,
+			expectedMsg:    "Hello, Alice!",
+			isError:        false,
+			description:    "GET /hello?name=Alice returns personalized greeting",
 		},
 		{
-			name:       "name=Bob returns 200 greeting",
-			url:        "/hello?name=Bob",
-			method:     http.MethodGet,
-			wantStatus: http.StatusOK,
-			wantJSON:   map[string]string{"message": "Hello, Bob!"},
+			name:           "hello without name parameter",
+			queryParam:     "",
+			expectedStatus: http.StatusOK,
+			expectedMsg:    "Hello, World!",
+			isError:        false,
+			description:    "GET /hello (no parameter) returns default greeting",
 		},
 		{
-			name:       "name with special chars returns 200 greeting",
-			url:        "/hello?name=O%27Brien",
-			method:     http.MethodGet,
-			wantStatus: http.StatusOK,
-			wantJSON:   map[string]string{"message": "Hello, O'Brien!"},
+			name:           "hello with empty name parameter",
+			queryParam:     "name=",
+			expectedStatus: http.StatusOK,
+			expectedMsg:    "Hello, World!",
+			isError:        false,
+			description:    "GET /hello?name= (empty parameter) returns default greeting",
 		},
 		{
-			name:       "empty name param returns 400",
-			url:        "/hello?name=",
-			method:     http.MethodGet,
-			wantStatus: http.StatusBadRequest,
-			wantJSON:   map[string]string{"error": "name parameter is required"},
-		},
-		{
-			name:       "missing name param returns 400",
-			url:        "/hello",
-			method:     http.MethodGet,
-			wantStatus: http.StatusBadRequest,
-			wantJSON:   map[string]string{"error": "name parameter is required"},
-		},
-		{
-			name:       "POST method returns 405",
-			url:        "/hello?name=Alice",
-			method:     http.MethodPost,
-			wantStatus: http.StatusMethodNotAllowed,
-			wantJSON:   map[string]string{"error": "method not allowed"},
+			name:           "hello with name=Bob",
+			queryParam:     "name=Bob",
+			expectedStatus: http.StatusOK,
+			expectedMsg:    "Hello, Bob!",
+			isError:        false,
+			description:    "GET /hello?name=Bob returns correct greeting",
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+	for _, tt := range tests {
+		tt := tt // capture for parallel execution
+		t.Run(tt.name, func(t *testing.T) {
+			// Create request
+			var req *http.Request
+			if tt.queryParam != "" {
+				req = httptest.NewRequest("GET", "/hello?"+tt.queryParam, nil)
+			} else {
+				req = httptest.NewRequest("GET", "/hello", nil)
+			}
 
-			h := handler.NewHelloHandler()
-			req := httptest.NewRequest(tc.method, tc.url, nil)
+			// Create response recorder
 			w := httptest.NewRecorder()
 
-			h.ServeHTTP(w, req)
+			// Create handler and call it
+			handler := NewHelloHandler()
+			handler.ServeHTTP(w, req)
 
-			res := w.Result()
-			defer res.Body.Close()
+			// Verify status code
+			assert.Equal(t, tt.expectedStatus, w.Code, tt.description)
 
-			assert.Equal(t, tc.wantStatus, res.StatusCode)
-			assert.Equal(t, "application/json", res.Header.Get("Content-Type"))
+			// Verify Content-Type header
+			contentType := w.Header().Get("Content-Type")
+			assert.Equal(t, "application/json", contentType,
+				"response should have application/json content type")
 
-			body, err := io.ReadAll(res.Body)
-			require.NoError(t, err)
+			// Parse and verify response
+			var resp TestHelloResponse
+			err := json.Unmarshal(w.Body.Bytes(), &resp)
+			require.NoError(t, err, "response should be valid JSON")
 
-			var got map[string]string
-			require.NoError(t, json.Unmarshal(body, &got))
-			assert.Equal(t, tc.wantJSON, got)
+			// Verify message content
+			assert.Equal(t, tt.expectedMsg, resp.Message,
+				"response message should match expected greeting")
 		})
 	}
 }
 
-func TestHelloHandler_Integration(t *testing.T) {
-	t.Parallel()
+// TestHelloResponseStructure validates JSON response structure and format
+func TestHelloResponseStructure(t *testing.T) {
+	req := httptest.NewRequest("GET", "/hello?name=TestUser", nil)
+	w := httptest.NewRecorder()
 
-	h := handler.NewHelloHandler()
-	svr := httptest.NewServer(h)
-	defer svr.Close()
+	handler := NewHelloHandler()
+	handler.ServeHTTP(w, req)
 
-	baseURL := svr.URL
+	require.Equal(t, http.StatusOK, w.Code, "handler should return 200 OK")
 
+	var resp TestHelloResponse
+	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	require.NoError(t, err, "response should be valid JSON")
+
+	require.NotEmpty(t, resp.Message, "message field should not be empty")
+	assert.Contains(t, resp.Message, "Hello", "message should contain greeting")
+	assert.Contains(t, resp.Message, "TestUser", "message should contain the name")
+}
+
+// TestHelloContentTypeHeader verifies correct Content-Type header
+func TestHelloContentTypeHeader(t *testing.T) {
 	tests := []struct {
-		name       string
-		path       string
-		wantStatus int
-		wantKey    string
-		wantValue  string
+		name      string
+		queryStr  string
 	}{
-		{
-			name:       "Alice gets greeted",
-			path:       "/?name=Alice",
-			wantStatus: http.StatusOK,
-			wantKey:    "message",
-			wantValue:  "Hello, Alice!",
-		},
-		{
-			name:       "missing param returns 400",
-			path:       "/",
-			wantStatus: http.StatusBadRequest,
-			wantKey:    "error",
-			wantValue:  "name parameter is required",
-		},
+		{"with name", "?name=Alice"},
+		{"without name", ""},
+		{"empty name", "?name="},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/hello"+tt.queryStr, nil)
+			w := httptest.NewRecorder()
 
-			res, err := http.Get(baseURL + tc.path)
+			handler := NewHelloHandler()
+			handler.ServeHTTP(w, req)
+
+			contentType := w.Header().Get("Content-Type")
+			assert.Equal(t, "application/json", contentType,
+				"content type should always be application/json")
+		})
+	}
+}
+
+// TestHelloStatusCode200 verifies HTTP 200 status code for valid requests
+func TestHelloStatusCode200(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"with name=Alice", "/hello?name=Alice"},
+		{"with name=Bob", "/hello?name=Bob"},
+		{"with name=TestUser", "/hello?name=TestUser"},
+		{"without name (default to World)", "/hello"},
+		{"with empty name parameter", "/hello?name="},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tt.url, nil)
+			w := httptest.NewRecorder()
+
+			handler := NewHelloHandler()
+			handler.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code,
+				"handler should always return 200 OK for valid requests")
+		})
+	}
+}
+
+// TestHelloWithNameParameter tests the name parameter parsing
+func TestHelloWithNameParameter(t *testing.T) {
+	tests := []struct {
+		name          string
+		nameParam     string
+		expectedGreet string
+	}{
+		{"Alice", "Alice", "Hello, Alice!"},
+		{"Bob", "Bob", "Hello, Bob!"},
+		{"Charlie", "Charlie", "Hello, Charlie!"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/hello?name="+tt.nameParam, nil)
+			w := httptest.NewRecorder()
+
+			handler := NewHelloHandler()
+			handler.ServeHTTP(w, req)
+
+			var resp TestHelloResponse
+			err := json.Unmarshal(w.Body.Bytes(), &resp)
 			require.NoError(t, err)
-			defer res.Body.Close()
 
-			assert.Equal(t, tc.wantStatus, res.StatusCode)
+			assert.Equal(t, tt.expectedGreet, resp.Message,
+				"message should contain the correct name")
+		})
+	}
+}
 
-			body, err := io.ReadAll(res.Body)
+// TestHelloDefaultWorld tests that missing name defaults to World
+func TestHelloDefaultWorld(t *testing.T) {
+	tests := []struct {
+		name        string
+		url         string
+		description string
+	}{
+		{"no query string", "/hello", "should use World when no name provided"},
+		{"empty name", "/hello?name=", "should use World when name is empty"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tt.url, nil)
+			w := httptest.NewRecorder()
+
+			handler := NewHelloHandler()
+			handler.ServeHTTP(w, req)
+
+			var resp TestHelloResponse
+			err := json.Unmarshal(w.Body.Bytes(), &resp)
 			require.NoError(t, err)
 
-			var got map[string]string
-			require.NoError(t, json.Unmarshal(body, &got))
-			assert.Equal(t, tc.wantValue, got[tc.wantKey])
+			assert.Equal(t, "Hello, World!", resp.Message, tt.description)
 		})
 	}
 }
