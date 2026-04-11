@@ -5,23 +5,25 @@ import (
 	"net/http"
 )
 
-// HelloHandler handles GET /hello?name=<name> requests.
+// HelloHandler handles GET /hello requests
 type HelloHandler struct{}
 
-// NewHelloHandler returns a new HelloHandler.
+// NewHelloHandler returns a new HelloHandler
 func NewHelloHandler() *HelloHandler {
 	return &HelloHandler{}
 }
 
-type helloResponse struct {
+// greetingResponse represents the JSON response body
+type greetingResponse struct {
 	Message string `json:"message"`
 }
 
+// errorResponse represents an error JSON response body
 type errorResponse struct {
 	Error string `json:"error"`
 }
 
-// ServeHTTP implements http.Handler.
+// ServeHTTP implements http.Handler for the hello endpoint
 func (h *HelloHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Content-Type", "application/json")
@@ -40,5 +42,5 @@ func (h *HelloHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(helloResponse{Message: "Hello, " + name + "!"})
+	_ = json.NewEncoder(w).Encode(greetingResponse{Message: "Hello, " + name + "!"})
 }
