@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/chrispeterson/go-api-1775281337/gateway/handler"
+	"github.com/chrispeterson/go-api-1775281337/gateway/internal"
 )
 
 func main() {
@@ -23,8 +24,16 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	// Initialize counter service
+	counter := internal.NewCounter()
+	logger.Info("counter service initialized", "initial_value", counter.Get())
+
+	// Register handlers
 	helloHandler := handler.NewHelloHandler()
 	mux.Handle("/hello", helloHandler)
+
+	countHandler := handler.NewCountHandler(counter)
+	mux.Handle("/count", countHandler)
 
 	srv := &http.Server{
 		Addr:         ":" + port,
@@ -51,10 +60,8 @@ func main() {
 	slog.Info("shutting down server")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	if err := srv.Shutdown(ctx); err != nil {
-		slog.Error("graceful shutdown failed", "err", err)
+		slog.Error("server shutdown error", "err", err)
 		os.Exit(1)
 	}
-	slog.Info("server stopped")
 }
