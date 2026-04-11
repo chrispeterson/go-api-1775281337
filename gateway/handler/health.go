@@ -5,19 +5,31 @@ import (
 	"net/http"
 )
 
-// HealthResponse represents the response from the health endpoint
+// HealthResponse represents the response body for the health check endpoint.
 type HealthResponse struct {
 	Status string `json:"status"`
 }
 
-// Health handles GET /health requests
+// Health handles GET /health requests and returns the service health status.
 func Health(w http.ResponseWriter, r *http.Request) {
+	// Only allow GET requests
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Set Content-Type header before writing response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 
-	response := HealthResponse{
-		Status: "ok",
+	// Serialize response using encoding/json.Marshal
+	resp := HealthResponse{Status: "ok"}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		// If marshaling fails, write error response
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
-	_ = json.NewEncoder(w).Encode(response)
+	_, _ = w.Write(body)
 }
