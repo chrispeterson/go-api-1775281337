@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -16,45 +17,50 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
+	// Create server instance
+	server := NewServer(logger)
 
+	// Create HTTP mux and register handlers
 	mux := http.NewServeMux()
 
 	helloHandler := handler.NewHelloHandler()
-	mux.Handle("/hello", helloHandler)
+	mux.Handle("GET /hello", helloHandler)
 
-	srv := NewServer(logger)
-	err := srv.Initialize(mux)
-	if err != nil {
+	// Initialize server with the mux
+	if err := server.Initialize(mux); err != nil {
 		logger.Error("failed to initialize server", "error", err)
 		os.Exit(1)
 	}
 
-	// Start server in background.
+	logger.Info("starting gateway server", "port", server.GetPort())
+
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start server in a goroutine
+	errChan := make(chan error, 1)
 	go func() {
-		slog.Info("starting server", "addr", ":"+port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server error", "err", err)
-			os.Exit(1)
-		}
+		errChan <- server.Listen()
 	}()
 
-	// Wait for shutdown signal.
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	// Wait for either signal or server error
+	select {
+	case sig := <-sigChan:
+		logger.Info("received signal", "signal", sig.String())
+		// Graceful shutdown with 10 second timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
 
-	slog.Info("shutting down server")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		slog.Error("server shutdown error", "err", err)
-		os.Exit(1)
+		if err := server.Shutdown(ctx); err != nil {
+			logger.Error("server shutdown error", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("server gracefully shut down")
+	case err := <-errChan:
+		if err != http.ErrServerClosed {
+			logger.Error("server error", "error", err)
+			os.Exit(1)
+		}
 	}
-
-	slog.Info("server stopped")
 }
