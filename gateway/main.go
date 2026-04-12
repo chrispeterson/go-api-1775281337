@@ -26,17 +26,16 @@ func main() {
 	helloHandler := handler.NewHelloHandler()
 	mux.Handle("/hello", helloHandler)
 
-	srv := &http.Server{
-		Addr:         ":" + port,
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
+	srv := NewServer(logger)
+	err := srv.Initialize(mux)
+	if err != nil {
+		logger.Error("failed to initialize server", "error", err)
+		os.Exit(1)
 	}
 
 	// Start server in background.
 	go func() {
-		slog.Info("starting server", "addr", srv.Addr)
+		slog.Info("starting server", "addr", ":"+port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "err", err)
 			os.Exit(1)
@@ -53,8 +52,9 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		slog.Error("graceful shutdown failed", "err", err)
+		slog.Error("server shutdown error", "err", err)
 		os.Exit(1)
 	}
+
 	slog.Info("server stopped")
 }
