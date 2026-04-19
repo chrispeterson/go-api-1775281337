@@ -1,0 +1,103 @@
+name: Go CI
+
+on:
+  push:
+    branches: ["main", "feat/**"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  BINARY_NAME: gateway
+  BINARY_OUTPUT: dist/gateway
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Run tests
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.out
+          retention-days: 7
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Create dist directory
+        run: mkdir -p dist
+
+      - name: Build binary
+        run: |
+          go build \
+            -v \
+            -ldflags="-s -w -X main.version=${GITHUB_SHA::8} -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -o ${{ env.BINARY_OUTPUT }} \
+            ./gateway/...
+
+      - name: Generate SHA256 checksum
+        run: |
+          cd dist
+          sha256sum gateway > gateway.sha256
+          echo "=== Checksum ==="
+          cat gateway.sha256
+
+      - name: Display build info
+        run: |
+          echo "=== Binary Info ==="
+          ls -lh dist/
+          file dist/gateway
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-binary-${{ github.sha }}
+          path: |
+            dist/gateway
+            dist/gateway.sha256
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload checksum artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gateway-checksum-${{ github.sha }}
+          path: dist/gateway.sha256
+          retention-days: 30
+          if-no-files-found: error
